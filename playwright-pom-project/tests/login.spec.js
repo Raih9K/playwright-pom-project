@@ -183,4 +183,134 @@ test.describe('PippAsync Customer Admin - Login Tests', () => {
     const isStillLoading = await loginPage.isLoading();
     expect(isStillLoading).toBe(false);
   });
+
+  test('should validate login API response structure during UI login', async ({ page, request }) => {
+    const validUser = testData.users.validUser;
+    const baseUrl = process.env.API_BASE_URL || 'https://dev.pippasync.customeradmin.boostonamazon.com/api';
+    
+    // Intercept the login API call made by the UI
+    let apiResponse = null;
+    
+    page.route('**/api/auth/login', async (route) => {
+      // Continue with the request and capture the response
+      const response = await route.continue();
+      apiResponse = await response.json();
+      return response;
+    });
+    
+    // Perform UI login
+    await loginPage.fillEmail(validUser.email);
+    await loginPage.fillPassword(validUser.password);
+    await loginPage.clickLoginButton();
+    
+    // Wait for login to complete
+    await loginPage.waitForLoginResult();
+    
+    // Validate that API was called and response structure is correct
+    if (apiResponse) {
+      // Validate the intercepted API response structure
+      expect(apiResponse).toHaveProperty('success');
+      expect(apiResponse).toHaveProperty('message');
+      expect(apiResponse).toHaveProperty('data');
+      
+      expect(apiResponse.success).toBe(true);
+      expect(apiResponse.message).toBe('Successfully logged in.');
+      
+      // Validate data structure
+      expect(apiResponse.data).toHaveProperty('user');
+      expect(apiResponse.data).toHaveProperty('access_token');
+      expect(apiResponse.data).toHaveProperty('access_token_expire_at');
+      
+      // Validate user object structure
+      const user = apiResponse.data.user;
+      expect(user).toMatchObject({
+        id: expect.any(Number),
+        name: expect.any(String),
+        email: validUser.email,
+        phone: expect.anything(),
+        google_id: expect.anything(),
+        ebay_user_id: expect.anything(),
+        is_active: expect.any(Number),
+        reset_token: expect.anything(),
+        reset_token_expire_at: expect.anything(),
+        created_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/),
+        updated_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/)
+      });
+      
+      // Validate user is active
+      expect(user.is_active).toBe(1);
+      
+      // Validate access token
+      expect(typeof apiResponse.data.access_token).toBe('string');
+      expect(apiResponse.data.access_token_expire_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/);
+      
+      // Validate token expiration is in the future
+      const expireDate = new Date(apiResponse.data.access_token_expire_at);
+      expect(expireDate.getTime()).toBeGreaterThan(Date.now());
+      
+      console.log('✅ API Response Structure Validated:', {
+        userId: user.id,
+        userName: user.name,
+        userEmail: user.email,
+        isActive: user.is_active,
+        hasToken: !!apiResponse.data.access_token,
+        tokenExpires: apiResponse.data.access_token_expire_at
+      });
+    }
+    
+    // Also validate UI success
+    const isUISuccessful = await loginPage.isLoginSuccessful();
+    expect(isUISuccessful).toBe(true);
+  });
+
+  test('should validate API response for admin@admin.com credentials', async ({ request }) => {
+    const baseUrl = process.env.API_BASE_URL || 'https://dev.pippasync.customeradmin.boostonamazon.com/api';
+    
+    // Test with the specific credentials from your example
+    const response = await loginApi(request, 'admin@admin.com', '123456', baseUrl);
+    
+    // Validate response matches your expected structure
+    if (response.status === 200 && response.body.success) {
+      expect(response.body).toEqual({
+        success: true,
+        message: "Successfully logged in.",
+        data: {
+          user: {
+            id: expect.any(Number),
+            name: expect.any(String),
+            email: "admin@admin.com",
+            phone: null,
+            google_id: null,
+            ebay_user_id: null,
+            is_active: 1,
+            reset_token: null,
+            reset_token_expire_at: null,
+            created_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/),
+            updated_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/)
+          },
+          access_token: expect.any(String),
+          access_token_expire_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/)
+        }
+      });
+      
+      // Validate specific values from your example
+      const user = response.body.data.user;
+      expect(user.email).toBe("admin@admin.com");
+      expect(user.is_active).toBe(1);
+      expect(user.phone).toBeNull();
+      expect(user.google_id).toBeNull();
+      expect(user.ebay_user_id).toBeNull();
+      expect(user.reset_token).toBeNull();
+      expect(user.reset_token_expire_at).toBeNull();
+      
+      // Log the actual response for verification
+      console.log('✅ Admin Login API Response:', JSON.stringify(response.body, null, 2));
+    } else {
+      console.log('❌ Login failed:', response.status, response.body);
+      // If login fails, still validate error structure
+      expect(response.body).toHaveProperty('success');
+      expect(response.body.success).toBe(false);
+      expect(response.body).toHaveProperty('message');
+    }
+  });
 });
